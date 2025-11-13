@@ -21,7 +21,7 @@ const dbConfig = {
 
 // Create connection pool
 const dbPool = mysql.createPool(dbConfig);
- 3001
+
 // ============================================================================
 // CONFIGURATION (from your PHP)
 // ============================================================================
@@ -31,22 +31,6 @@ const config = {
     mikrotikPassword: '443JNZ',
     mikrotikPort: 8728
 };
-
-// ============================================================================
-// LOGGING UTILITIES
-// ============================================================================
-const fs = require('fs').promises;
-const path = require('path');
-
-async function logToFile(filename, data) {
-    try {
-        const timestamp = new Date().toISOString();
-        const logEntry = `${timestamp} | ${data}\n`;
-        await fs.appendFile(path.join('./logs', filename), logEntry);
-    } catch (error) {
-        console.error('Logging error:', error);
-    }
-}
 
 // ============================================================================
 // PAYBILL PAYMENT LOGGING (Converted from PHP)
@@ -76,10 +60,10 @@ async function logPaybillPayment(paymentData) {
         ];
 
         const [result] = await dbPool.execute(query, values);
-        await logToFile('paybill_log.txt', `Payment logged - TransID: ${paymentData.TransID}`);
+        console.log(`✅ Payment logged to database - TransID: ${paymentData.TransID}`);
         return { success: true, insertId: result.insertId };
     } catch (error) {
-        await logToFile('paybill_errors.txt', `Error: ${error.message}`);
+        console.error('❌ Database logging error:', error.message);
         return { success: false, error: error.message };
     }
 }
@@ -116,11 +100,10 @@ async function processSMSCredits(data) {
     const { BillRefNumber: billRef, TransAmount: amount, TransID: transactionId } = data;
     
     try {
-        // Convert your PHP logic here
         const [ispRows] = await dbPool.execute("SELECT id, name FROM isps WHERE smsaccount = ?", [billRef]);
         
         if (ispRows.length === 0) {
-            await logToFile('sms_errors.txt', `ISP not found for account: ${billRef}`);
+            console.error(`❌ ISP not found for SMS account: ${billRef}`);
             return { success: false, reason: 'isp_not_found' };
         }
 
@@ -151,6 +134,7 @@ async function processSMSCredits(data) {
             await notifyAdmins(`✅ SMS CREDITS PURCHASED\nISP: ${isp.name}\nCredits: ${smsCredits} SMS\nAmount: KES ${amount}`);
             await notifyISP(isp.id, `✅ SMS Credits Purchased\nHi ${isp.name},\nYour SMS wallet topped up.\nCredits: ${smsCredits} SMS\nAmount: KES ${amount}`);
 
+            console.log(`✅ SMS credits processed: ${smsCredits} credits for ISP: ${isp.name}`);
             return { success: true, credits: smsCredits, isp: isp.name };
 
         } catch (error) {
@@ -161,7 +145,7 @@ async function processSMSCredits(data) {
         }
 
     } catch (error) {
-        await logToFile('sms_processing_errors.txt', `Error: ${error.message}`);
+        console.error('❌ SMS processing error:', error.message);
         return { success: false, error: error.message };
     }
 }
@@ -176,7 +160,7 @@ async function processWhatsAppCredits(data) {
         const [ispRows] = await dbPool.execute("SELECT id, name FROM isps WHERE waaccount = ?", [billRef]);
         
         if (ispRows.length === 0) {
-            await logToFile('wa_errors.txt', `ISP not found for WA account: ${billRef}`);
+            console.error(`❌ ISP not found for WA account: ${billRef}`);
             return { success: false, reason: 'isp_not_found' };
         }
 
@@ -205,6 +189,7 @@ async function processWhatsAppCredits(data) {
             await notifyAdmins(`✅ WHATSAPP CREDITS PURCHASED\nISP: ${isp.name}\nCredits: ${waCredits} Messages\nAmount: KES ${amount}`);
             await notifyISP(isp.id, `✅ WhatsApp Credits Purchased\nCredits: ${waCredits} Messages\nAmount: KES ${amount}`);
 
+            console.log(`✅ WhatsApp credits processed: ${waCredits} credits for ISP: ${isp.name}`);
             return { success: true, credits: waCredits, isp: isp.name };
 
         } catch (error) {
@@ -215,7 +200,7 @@ async function processWhatsAppCredits(data) {
         }
 
     } catch (error) {
-        await logToFile('wa_processing_errors.txt', `Error: ${error.message}`);
+        console.error('❌ WhatsApp processing error:', error.message);
         return { success: false, error: error.message };
     }
 }
@@ -240,17 +225,18 @@ async function processCustomerPayment(data) {
         `, [billRef]);
 
         if (userRows.length === 0) {
-            await logToFile('customer_errors.txt', `PPPoE User not found: ${billRef}`);
+            console.error(`❌ PPPoE User not found: ${billRef}`);
             return { success: false, reason: 'user_not_found' };
         }
 
         const user = userRows[0];
         // Continue converting your PHP customer payment logic here...
         
+        console.log(`✅ Customer payment processed for user: ${user.username}`);
         return { success: true, user: user.username, amount: amount };
 
     } catch (error) {
-        await logToFile('customer_processing_errors.txt', `Error: ${error.message}`);
+        console.error('❌ Customer payment processing error:', error.message);
         return { success: false, error: error.message };
     }
 }
@@ -265,7 +251,7 @@ async function processISPServicePayment(data) {
         const [ispRows] = await dbPool.execute("SELECT id, name FROM isps WHERE pay_account_number = ?", [billRef]);
         
         if (ispRows.length === 0) {
-            await logToFile('isp_service_errors.txt', `ISP not found for account: ${billRef}`);
+            console.error(`❌ ISP not found for service account: ${billRef}`);
             return { success: false, reason: 'isp_not_found' };
         }
 
@@ -293,6 +279,7 @@ async function processISPServicePayment(data) {
             await notifyAdmins(`💰 ISP SERVICE PAYMENT\nISP: ${isp.name}\nAmount: KES ${amount}\nNew Balance: KES ${newBalance}`);
             await notifyISP(isp.id, `💰 Service Payment Received\nAmount: KES ${amount}\nNew Balance: KES ${newBalance}`);
 
+            console.log(`✅ ISP service payment processed: KES ${amount} for ISP: ${isp.name}`);
             return { success: true, isp: isp.name, newBalance: newBalance };
 
         } catch (error) {
@@ -303,7 +290,7 @@ async function processISPServicePayment(data) {
         }
 
     } catch (error) {
-        await logToFile('isp_service_errors.txt', `Error: ${error.message}`);
+        console.error('❌ ISP service payment error:', error.message);
         return { success: false, error: error.message };
     }
 }
@@ -313,8 +300,7 @@ async function processISPServicePayment(data) {
 // ============================================================================
 async function notifyAdmins(message, paymentData = null) {
     try {
-        // Convert your PHP WhatsApp/SMS notification logic here
-        await logToFile('admin_notifications.txt', `ADMIN: ${message}`);
+        console.log(`📢 Admin Notification: ${message}`);
         
         // Example: Send to your notification service
         for (const phone of config.adminPhones) {
@@ -322,7 +308,7 @@ async function notifyAdmins(message, paymentData = null) {
             // await sendSMS(message, phone);
         }
     } catch (error) {
-        await logToFile('notification_errors.txt', `Admin notify error: ${error.message}`);
+        console.error('❌ Admin notification error:', error.message);
     }
 }
 
@@ -334,10 +320,10 @@ async function notifyISP(ispId, message) {
             const isp = ispRows[0];
             // await sendWhatsApp(message, isp.phone_number);
             // await sendSMS(message, isp.phone_number);
-            await logToFile('isp_notifications.txt', `ISP ${isp.name}: ${message}`);
+            console.log(`📱 ISP Notification to ${isp.name}: ${message}`);
         }
     } catch (error) {
-        await logToFile('isp_notify_errors.txt', `ISP notify error: ${error.message}`);
+        console.error('❌ ISP notification error:', error.message);
     }
 }
 
@@ -352,7 +338,7 @@ app.post('/callbackprocess', async (req, res) => {
 
         // Validate required fields
         if (!paymentData.TransID) {
-            await logToFile('validation_errors.txt', 'Missing TransID in processing request');
+            console.error('❌ Missing TransID in processing request');
             return res.status(400).json({ success: false, error: 'Missing TransID' });
         }
 
@@ -378,7 +364,6 @@ app.post('/callbackprocess', async (req, res) => {
 
     } catch (error) {
         console.error('💥 Processing error:', error);
-        await logToFile('processing_errors.txt', `Critical error: ${error.message}`);
         
         res.status(500).json({
             success: false,
