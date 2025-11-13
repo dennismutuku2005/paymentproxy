@@ -14,8 +14,8 @@ app.use(express.json());
 const dbConfig = {
     host: 'localhost',
     database: 'onenetwo_onepppoe',
-    user: 'onenetwo_onepppoe',
-    password: 'Muuo02593.',
+    user: 'root',
+    password: 'Muuo02593.443JNZ',
     connectionLimit: 10
 };
 
