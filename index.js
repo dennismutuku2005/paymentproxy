@@ -139,7 +139,8 @@ async function processSMSCredits(data) {
 
         } catch (error) {
             await connection.rollback();
-            throw error;
+            console.error('❌ SMS transaction error:', error.message);
+            return { success: false, error: error.message };
         } finally {
             connection.release();
         }
@@ -194,7 +195,8 @@ async function processWhatsAppCredits(data) {
 
         } catch (error) {
             await connection.rollback();
-            throw error;
+            console.error('❌ WhatsApp transaction error:', error.message);
+            return { success: false, error: error.message };
         } finally {
             connection.release();
         }
@@ -284,7 +286,8 @@ async function processISPServicePayment(data) {
 
         } catch (error) {
             await connection.rollback();
-            throw error;
+            console.error('❌ ISP service transaction error:', error.message);
+            return { success: false, error: error.message };
         } finally {
             connection.release();
         }
