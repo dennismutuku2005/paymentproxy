@@ -344,7 +344,7 @@ async function processCustomerPayment(data) {
                 u.isp_id,
                 u.status,
                 u.next_payment_date as current_next_payment,
-                u.phone_number,
+                u.phone as phone_number,
                 r.local_ip as router_ip,
                 r.router_name,
                 i.name as isp_name,
