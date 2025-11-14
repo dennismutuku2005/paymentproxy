@@ -266,7 +266,7 @@ async function notifyISP(ispId, message) {
 async function notifyCustomer(userId, message) {
     try {
         const [userRows] = await dbPool.execute(
-            "SELECT phone_number, full_name FROM pppoe_users WHERE id = ?", 
+            "SELECT phone as phone_number, full_name FROM pppoe_users WHERE id = ?", 
             [userId]
         );
         
