@@ -26,7 +26,7 @@ const dbPool = mysql.createPool(dbConfig);
 // CONFIGURATION
 // ============================================================================
 const config = {
-    adminPhones: ['254707819850', '254741390949'],
+    adminPhones: ['254793527494'],
     mikrotikUser: 'apiuser',
     mikrotikPassword: '443JNZ',
     mikrotikPort: 8728,
