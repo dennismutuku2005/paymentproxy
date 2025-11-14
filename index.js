@@ -29,16 +29,82 @@ const config = {
     adminPhones: ['254707819850', '254741390949'],
     mikrotikUser: 'apiuser',
     mikrotikPassword: '443JNZ',
-    mikrotikPort: 8728
+    mikrotikPort: 8728,
+    smsApiKey: '2657d153e378833edf31c1cfdfcb89f5',
+    smsPartnerID: '12560',
+    smsShortcode: 'TextSMS'
 };
+
+// ============================================================================
+// SMS NOTIFICATION SERVICE
+// ============================================================================
+async function sendSMS(message, mobile) {
+    try {
+        // Ensure mobile number is in 254 format
+        let formattedMobile = mobile.toString().trim();
+        
+        // Convert 07... to 2547...
+        if (formattedMobile.startsWith('07') && formattedMobile.length === 10) {
+            formattedMobile = '254' + formattedMobile.substring(1);
+        }
+        // Convert 7... to 2547...
+        else if (formattedMobile.startsWith('7') && formattedMobile.length === 9) {
+            formattedMobile = '254' + formattedMobile;
+        }
+        // Ensure it starts with 254
+        else if (!formattedMobile.startsWith('254')) {
+            formattedMobile = '254' + formattedMobile.replace(/^0+/, '');
+        }
+
+        // Validate final format
+        if (!/^254\d{9}$/.test(formattedMobile)) {
+            console.error(`❌ Invalid mobile number format: ${mobile} -> ${formattedMobile}`);
+            return { success: false, error: 'Invalid mobile number format' };
+        }
+
+        const smsPayload = {
+            "apikey": config.smsApiKey,
+            "partnerID": config.smsPartnerID,
+            "message": message,
+            "shortcode": config.smsShortcode,
+            "mobile": formattedMobile
+        };
+
+        console.log(`📱 Sending SMS to: ${formattedMobile}`);
+        console.log(`Message: ${message}`);
+
+        const response = await fetch('https://sms.textsms.co.ke/api/services/sendsms/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(smsPayload)
+        });
+        
+        const result = await response.json();
+        
+        console.log("SMS API Response:", JSON.stringify(result, null, 2));
+        
+        return {
+            success: result.success || false,
+            message: result.message || 'SMS sent',
+            response: result
+        };
+    } catch (error) {
+        console.error('❌ SMS sending error:', error);
+        return { 
+            success: false, 
+            error: error.message,
+            message: 'Failed to send SMS'
+        };
+    }
+}
 
 // ============================================================================
 // UTILITY FUNCTIONS
 // ============================================================================
 function parseAmount(amount) {
-    // Handle both string and number inputs, ensure we get a proper float
     if (typeof amount === 'string') {
-        // Remove any non-numeric characters except decimal point
         const cleaned = amount.replace(/[^\d.]/g, '');
         return parseFloat(cleaned) || 0;
     }
@@ -48,6 +114,16 @@ function parseAmount(amount) {
 function formatCurrency(amount) {
     const numAmount = parseAmount(amount);
     return `KES ${numAmount.toFixed(2)}`;
+}
+
+function formatDate(dateString) {
+    if (!dateString) return 'Not set';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-GB', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric'
+    });
 }
 
 // ============================================================================
@@ -145,6 +221,71 @@ async function enablePPPoEUser(routerIp, username) {
 }
 
 // ============================================================================
+// NOTIFICATION FUNCTIONS
+// ============================================================================
+async function notifyAdmins(message, paymentData = null) {
+    try {
+        console.log(`📢 Admin Notification: ${message}`);
+        
+        // Send SMS to all admin numbers
+        for (const phone of config.adminPhones) {
+            const smsResult = await sendSMS(message, phone);
+            if (!smsResult.success) {
+                console.error(`❌ Failed to send admin SMS to ${phone}:`, smsResult.error);
+            } else {
+                console.log(`✅ Admin SMS sent to ${phone}`);
+            }
+        }
+    } catch (error) {
+        console.error('❌ Admin notification error:', error.message);
+    }
+}
+
+async function notifyISP(ispId, message) {
+    try {
+        const [ispRows] = await dbPool.execute(
+            "SELECT contact_phone as phone_number, name FROM isps WHERE id = ?", 
+            [ispId]
+        );
+        
+        if (ispRows.length > 0 && ispRows[0].phone_number) {
+            const isp = ispRows[0];
+            const smsResult = await sendSMS(message, isp.phone_number);
+            
+            if (!smsResult.success) {
+                console.error(`❌ Failed to send ISP SMS to ${isp.name}:`, smsResult.error);
+            } else {
+                console.log(`✅ ISP SMS sent to ${isp.name}`);
+            }
+        }
+    } catch (error) {
+        console.error('❌ ISP notification error:', error.message);
+    }
+}
+
+async function notifyCustomer(userId, message) {
+    try {
+        const [userRows] = await dbPool.execute(
+            "SELECT phone_number, full_name FROM pppoe_users WHERE id = ?", 
+            [userId]
+        );
+        
+        if (userRows.length > 0 && userRows[0].phone_number) {
+            const user = userRows[0];
+            const smsResult = await sendSMS(message, user.phone_number);
+            
+            if (!smsResult.success) {
+                console.error(`❌ Failed to send customer SMS to ${user.full_name}:`, smsResult.error);
+            } else {
+                console.log(`✅ Customer SMS sent to ${user.full_name}`);
+            }
+        }
+    } catch (error) {
+        console.error('❌ Customer notification error:', error.message);
+    }
+}
+
+// ============================================================================
 // PAYMENT ROUTING
 // ============================================================================
 async function processPayment(data) {
@@ -154,7 +295,6 @@ async function processPayment(data) {
 
     console.log(`🔄 Processing payment: ${transactionId} for ${billRef}, Amount: ${formatCurrency(amount)}`);
 
-    // Log initial payment details for debugging
     await logDebugInfo(transactionId, 'PAYMENT_RECEIVED', 
         `Payment received - Reference: ${billRef}, Amount: ${formatCurrency(amount)}`,
         { billRef, amount, transactionId }
@@ -182,19 +322,17 @@ async function processPayment(data) {
 // CUSTOMER PAYMENT PROCESSING (COMPLETE LOGIC)
 // ============================================================================
 async function processCustomerPayment(data) {
-    const { BillRefNumber: billRef, TransAmount: amountStr, TransID: transactionId } = data;
+    const { BillRefNumber: billRef, TransAmount: amountStr, TransID: transactionId, MSISDN: customerPhone } = data;
     const amount = parseAmount(amountStr);
     
     const connection = await dbPool.getConnection();
     
     try {
-        // Log start of customer payment processing
         await logDebugInfo(transactionId, 'CUSTOMER_PAYMENT_START', 
             `Starting customer payment processing`, 
-            { billRef, amount, transactionId }
+            { billRef, amount, transactionId, customerPhone }
         );
 
-        // Get user details with router and ISP information
         const [userRows] = await connection.execute(`
             SELECT 
                 u.id, 
@@ -206,6 +344,7 @@ async function processCustomerPayment(data) {
                 u.isp_id,
                 u.status,
                 u.next_payment_date as current_next_payment,
+                u.phone_number,
                 r.local_ip as router_ip,
                 r.router_name,
                 i.name as isp_name,
@@ -273,7 +412,6 @@ async function processCustomerPayment(data) {
 
             if (existingWallet) {
                 previousBalance = parseAmount(existingWallet.balance);
-                // Update existing wallet
                 await connection.execute(`
                     UPDATE isp_wallet 
                     SET balance = balance + ?, 
@@ -282,7 +420,6 @@ async function processCustomerPayment(data) {
                 `, [amount, user.isp_id]);
                 walletAction = "Updated existing wallet";
             } else {
-                // Create new wallet
                 await connection.execute(`
                     INSERT INTO isp_wallet (isp_id, balance, last_updated) 
                     VALUES (?, ?, NOW())
@@ -311,6 +448,7 @@ async function processCustomerPayment(data) {
             let reconnectionStatus = "Not attempted";
             let reconnectionDetails = "";
             let newNextPaymentDate = "";
+            let customerNotified = false;
 
             // 4. PROCESS PPPoE RECONNECTION IF PAYMENT IS SUFFICIENT
             if (amount >= packageAmount) {
@@ -350,11 +488,17 @@ async function processCustomerPayment(data) {
                         const paymentTiming = (user.current_next_payment > new Date().toISOString().split('T')[0]) ? "EARLY" : "ON_TIME/LATE";
                         reconnectionDetails = `User reconnected via Mikrotik API | Payment: ${paymentTiming}`;
 
+                        // ✅ NOTIFY CUSTOMER ONLY WHEN SUCCESSFULLY RECONNECTED
+                        const customerMessage = `Dear customer, your internet has been reconnected. Expiry date: ${formatDate(newNextPaymentDate)}. Thank you for your payment.`;
+                        await notifyCustomer(user.id, customerMessage);
+                        customerNotified = true;
+
                         await logDebugInfo(transactionId, 'RECONNECTION_SUCCESS', 
-                            `User reconnected successfully`, 
+                            `User reconnected successfully and customer notified`, 
                             { 
                                 newNextPaymentDate: newNextPaymentDate,
-                                paymentTiming: paymentTiming 
+                                paymentTiming: paymentTiming,
+                                customerNotified: true
                             }
                         );
 
@@ -416,26 +560,27 @@ async function processCustomerPayment(data) {
 
             await connection.commit();
 
-            // 5. SEND NOTIFICATIONS
-            const nextPaymentFormatted = newNextPaymentDate ? new Date(newNextPaymentDate).toLocaleDateString() : 'Not updated';
-            const currentDueDate = user.current_next_payment ? new Date(user.current_next_payment).toLocaleDateString() : 'Not set';
+            // 5. SEND ADMIN AND ISP NOTIFICATIONS
+            const nextPaymentFormatted = newNextPaymentDate ? formatDate(newNextPaymentDate) : 'Not updated';
+            const currentDueDate = user.current_next_payment ? formatDate(user.current_next_payment) : 'Not set';
 
-            const summary = `*CUSTOMER PAYMENT RECEIVED*\n\n` +
-                           `Customer: ${user.full_name}\n` +
-                           `Username: ${user.username}\n` +
-                           `Router: ${user.router_name}\n` +
-                           `Paid: ${formatCurrency(amount)}\n` +
-                           `Package: ${formatCurrency(packageAmount)}\n` +
-                           `Transaction: ${transactionId}\n\n` +
-                           `Previous Due: ${currentDueDate}\n` +
-                           `New Due Date: ${nextPaymentFormatted}\n\n` +
-                           `ISP Wallet: ${formatCurrency(newBalance)}\n` +
-                           `Wallet Action: ${walletAction}\n\n` +
-                           `Reconnection Status: ${reconnectionStatus}\n` +
-                           `${reconnectionDetails}`;
+            const adminSummary = `*CUSTOMER PAYMENT RECEIVED*\n\n` +
+                               `Customer: ${user.full_name}\n` +
+                               `Username: ${user.username}\n` +
+                               `Router: ${user.router_name}\n` +
+                               `Paid: ${formatCurrency(amount)}\n` +
+                               `Package: ${formatCurrency(packageAmount)}\n` +
+                               `Transaction: ${transactionId}\n\n` +
+                               `Previous Due: ${currentDueDate}\n` +
+                               `New Due Date: ${nextPaymentFormatted}\n\n` +
+                               `ISP Wallet: ${formatCurrency(newBalance)}\n` +
+                               `Wallet Action: ${walletAction}\n\n` +
+                               `Reconnection Status: ${reconnectionStatus}\n` +
+                               `${reconnectionDetails}\n\n` +
+                               `Customer Notified: ${customerNotified ? 'YES' : 'NO'}`;
 
-            await notifyAdmins(summary);
-            await notifyISP(user.isp_id, summary);
+            await notifyAdmins(adminSummary);
+            await notifyISP(user.isp_id, adminSummary);
 
             // Final success log
             await logDebugInfo(transactionId, 'PROCESSING_COMPLETE', 
@@ -444,7 +589,8 @@ async function processCustomerPayment(data) {
                     reconnectionStatus: reconnectionStatus,
                     walletUpdated: true,
                     transactionRecorded: true,
-                    finalBalance: newBalance 
+                    finalBalance: newBalance,
+                    customerNotified: customerNotified
                 }
             );
 
@@ -455,7 +601,8 @@ async function processCustomerPayment(data) {
                 amount: amount,
                 reconnectionStatus: reconnectionStatus,
                 walletUpdated: true,
-                transactionRecorded: true
+                transactionRecorded: true,
+                customerNotified: customerNotified
             };
 
         } catch (error) {
@@ -480,7 +627,7 @@ async function processCustomerPayment(data) {
 }
 
 // ============================================================================
-// SMS CREDITS PROCESSING (COMPLETE LOGIC)
+// SMS CREDITS PROCESSING
 // ============================================================================
 async function processSMSCredits(data) {
     const { BillRefNumber: billRef, TransAmount: amountStr, TransID: transactionId } = data;
@@ -537,8 +684,11 @@ async function processSMSCredits(data) {
             );
 
             // 3. Notify admins and ISP
-            await notifyAdmins(`✅ SMS CREDITS PURCHASED\nISP: ${isp.name}\nCredits: ${smsCredits} SMS\nAmount: ${formatCurrency(amount)}`);
-            await notifyISP(isp.id, `✅ SMS Credits Purchased\nHi ${isp.name},\nYour SMS wallet topped up.\nCredits: ${smsCredits} SMS\nAmount: ${formatCurrency(amount)}`);
+            const adminMessage = `✅ SMS CREDITS PURCHASED\nISP: ${isp.name}\nCredits: ${smsCredits} SMS\nAmount: ${formatCurrency(amount)}`;
+            const ispMessage = `✅ SMS Credits Purchased\nHi ${isp.name},\nYour SMS wallet topped up.\nCredits: ${smsCredits} SMS\nAmount: ${formatCurrency(amount)}`;
+
+            await notifyAdmins(adminMessage);
+            await notifyISP(isp.id, ispMessage);
 
             console.log(`✅ SMS credits processed: ${smsCredits} credits for ISP: ${isp.name}`);
             return { success: true, credits: smsCredits, isp: isp.name };
@@ -565,7 +715,7 @@ async function processSMSCredits(data) {
 }
 
 // ============================================================================
-// WHATSAPP CREDITS PROCESSING (COMPLETE LOGIC)
+// WHATSAPP CREDITS PROCESSING
 // ============================================================================
 async function processWhatsAppCredits(data) {
     const { BillRefNumber: billRef, TransAmount: amountStr, TransID: transactionId } = data;
@@ -622,8 +772,11 @@ async function processWhatsAppCredits(data) {
             );
 
             // 3. Notify admins and ISP
-            await notifyAdmins(`✅ WHATSAPP CREDITS PURCHASED\nISP: ${isp.name}\nCredits: ${waCredits} Messages\nAmount: ${formatCurrency(amount)}`);
-            await notifyISP(isp.id, `✅ WhatsApp Credits Purchased\nCredits: ${waCredits} Messages\nAmount: ${formatCurrency(amount)}`);
+            const adminMessage = `✅ WHATSAPP CREDITS PURCHASED\nISP: ${isp.name}\nCredits: ${waCredits} Messages\nAmount: ${formatCurrency(amount)}`;
+            const ispMessage = `✅ WhatsApp Credits Purchased\nCredits: ${waCredits} Messages\nAmount: ${formatCurrency(amount)}`;
+
+            await notifyAdmins(adminMessage);
+            await notifyISP(isp.id, ispMessage);
 
             console.log(`✅ WhatsApp credits processed: ${waCredits} credits for ISP: ${isp.name}`);
             return { success: true, credits: waCredits, isp: isp.name };
@@ -650,7 +803,7 @@ async function processWhatsAppCredits(data) {
 }
 
 // ============================================================================
-// ISP SERVICE PAYMENT PROCESSING (COMPLETE LOGIC)
+// ISP SERVICE PAYMENT PROCESSING
 // ============================================================================
 async function processISPServicePayment(data) {
     const { BillRefNumber: billRef, TransAmount: amountStr, TransID: transactionId } = data;
@@ -706,8 +859,11 @@ async function processISPServicePayment(data) {
             );
 
             // 3. Notify admins and ISP
-            await notifyAdmins(`💰 ISP SERVICE PAYMENT\nISP: ${isp.name}\nAmount: ${formatCurrency(amount)}\nNew Balance: ${formatCurrency(newBalance)}`);
-            await notifyISP(isp.id, `💰 Service Payment Received\nAmount: ${formatCurrency(amount)}\nNew Balance: ${formatCurrency(newBalance)}`);
+            const adminMessage = `💰 ISP SERVICE PAYMENT\nISP: ${isp.name}\nAmount: ${formatCurrency(amount)}\nNew Balance: ${formatCurrency(newBalance)}`;
+            const ispMessage = `💰 Service Payment Received\nAmount: ${formatCurrency(amount)}\nNew Balance: ${formatCurrency(newBalance)}`;
+
+            await notifyAdmins(adminMessage);
+            await notifyISP(isp.id, ispMessage);
 
             console.log(`✅ ISP service payment processed: ${formatCurrency(amount)} for ISP: ${isp.name}`);
             return { success: true, isp: isp.name, newBalance: newBalance };
@@ -730,38 +886,6 @@ async function processISPServicePayment(data) {
             { error: error.message }
         );
         return { success: false, error: error.message };
-    }
-}
-
-// ============================================================================
-// NOTIFICATION FUNCTIONS
-// ============================================================================
-async function notifyAdmins(message, paymentData = null) {
-    try {
-        console.log(`📢 Admin Notification: ${message}`);
-        
-        // Add your WhatsApp/SMS notification logic here
-        for (const phone of config.adminPhones) {
-            // await sendWhatsApp(message, phone);
-            // await sendSMS(message, phone);
-        }
-    } catch (error) {
-        console.error('❌ Admin notification error:', error.message);
-    }
-}
-
-async function notifyISP(ispId, message) {
-    try {
-        const [ispRows] = await dbPool.execute("SELECT contact_phone as phone_number, name FROM isps WHERE id = ?", [ispId]);
-        
-        if (ispRows.length > 0 && ispRows[0].phone_number) {
-            const isp = ispRows[0];
-            // await sendWhatsApp(message, isp.phone_number);
-            // await sendSMS(message, isp.phone_number);
-            console.log(`📱 ISP Notification to ${isp.name}: ${message}`);
-        }
-    } catch (error) {
-        console.error('❌ ISP notification error:', error.message);
     }
 }
 
@@ -859,4 +983,5 @@ app.listen(PORT, async () => {
     console.log(`🚀 Payment Processor running on port ${PORT}`);
     console.log(`📍 Endpoint: http://167.99.9.95:${PORT}/callbackprocess`);
     console.log('🔍 Debug logging enabled - check payment_debug_log table for details');
+    console.log('📱 SMS notifications enabled for admins, ISPs, and customers');
 });
