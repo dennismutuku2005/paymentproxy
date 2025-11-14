@@ -566,15 +566,10 @@ async function processCustomerPayment(data) {
 
             const adminSummary = `*CUSTOMER PAYMENT RECEIVED*\n\n` +
                                `Customer: ${user.full_name}\n` +
-                               `Username: ${user.username}\n` +
-                               `Router: ${user.router_name}\n` +
                                `Paid: ${formatCurrency(amount)}\n` +
-                               `Package: ${formatCurrency(packageAmount)}\n` +
                                `Transaction: ${transactionId}\n\n` +
-                               `Previous Due: ${currentDueDate}\n` +
                                `New Due Date: ${nextPaymentFormatted}\n\n` +
                                `ISP Wallet: ${formatCurrency(newBalance)}\n` +
-                               `Wallet Action: ${walletAction}\n\n` +
                                `Reconnection Status: ${reconnectionStatus}\n` +
                                `${reconnectionDetails}\n\n` +
                                `Customer Notified: ${customerNotified ? 'YES' : 'NO'}`;
